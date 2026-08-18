@@ -1,6 +1,6 @@
 #requires -Version 5.1
 <#
-    Wxst Tools - License Launcher
+    Wxst OS - License Launcher
     ------------------------------------------------------------------
     Keys are generated server-side (see wxst-license-worker.js) and
     validated by calling that server on activation and on every
@@ -12,7 +12,7 @@
 # ============================== CONFIG ==============================
 $ApiBase         = "https://wxst-licenses.taxhriley.workers.dev"
 $ApiBase         = $ApiBase.TrimEnd('/')  # guards against a trailing slash breaking /activate routing
-$AppName         = "Wxst Tools"
+$AppName         = "Wxst OS"
 $LicenseDir      = Join-Path $env:LOCALAPPDATA "WxstTools"
 $LicenseFile     = Join-Path $LicenseDir "license.dat"
 $MinAuthSeconds  = 5
@@ -60,24 +60,30 @@ function Write-AnsiColorName($Text, $ColorName, [switch]$NoNewline) {
 }
 
 # ============================== BANNER ===============================
-# "WXST TOOLS" - ANSI Shadow style block art
+# "WXST OS" - Bloody font
 $BannerLines = @(
-    '██╗    ██╗██╗  ██╗███████╗████████╗   ████████╗ ██████╗  ██████╗ ██╗     ███████╗',
-    '██║    ██║╚██╗██╔╝██╔════╝╚══██╔══╝   ╚══██╔══╝██╔═══██╗██╔═══██╗██║     ██╔════╝',
-    '██║ █╗ ██║ ╚███╔╝ ███████╗   ██║         ██║   ██║   ██║██║   ██║██║     ███████╗',
-    '██║███╗██║ ██╔██╗ ╚════██║   ██║         ██║   ██║   ██║██║   ██║██║     ╚════██║',
-    '╚███╔███╔╝██╔╝ ██╗███████║   ██║         ██║   ╚██████╔╝╚██████╔╝███████╗███████║',
-    ' ╚══╝╚══╝ ╚═╝  ╚═╝╚══════╝   ╚═╝         ╚═╝    ╚═════╝  ╚═════╝ ╚══════╝╚══════╝'
+    ' █     █░▒██   ██▒  ██████ ▄▄▄█████▓   ▒█████    ██████ ',
+    '▓█░ █ ░█░▒▒ █ █ ▒░▒██    ▒ ▓  ██▒ ▓▒  ▒██▒  ██▒▒██    ▒ ',
+    '▒█░ █ ░█ ░░  █   ░░ ▓██▄   ▒ ▓██░ ▒░  ▒██░  ██▒░ ▓██▄   ',
+    '░█░ █ ░█  ░ █ █ ▒   ▒   ██▒░ ▓██▓ ░   ▒██   ██░  ▒   ██▒',
+    '░░██▒██▓ ▒██▒ ▒██▒▒██████▒▒  ▒██▒ ░   ░ ████▓▒░▒██████▒▒',
+    '░ ▓░▒ ▒  ▒▒ ░ ░▓ ░▒ ▒▓▒ ▒ ░  ▒ ░░     ░ ▒░▒░▒░ ▒ ▒▓▒ ▒ ░',
+    '  ▒ ░ ░  ░░   ░▒ ░░ ░▒  ░ ░    ░        ░ ▒ ▒░ ░ ░▒  ░ ░',
+    '  ░   ░   ░    ░  ░  ░  ░    ░        ░ ░ ░ ▒  ░  ░  ░  ',
+    '    ░     ░    ░        ░                 ░ ░        ░  '
 )
 
-# Dark purple (top) -> light purple/lavender (bottom) gradient
+# Dark red (top) -> bright red (bottom) gradient
 $GradientStops = @(
-    @{R=48;  G=10;  B=90},
-    @{R=76;  G=20;  B=130},
-    @{R=110; G=45;  B=170},
-    @{R=145; G=80;  B=205},
-    @{R=180; G=125; B=230},
-    @{R=215; G=175; B=250}
+    @{R=60;  G=0;   B=0},
+    @{R=90;  G=5;   B=5},
+    @{R=115; G=10;  B=10},
+    @{R=140; G=15;  B=15},
+    @{R=165; G=20;  B=20},
+    @{R=190; G=25;  B=25},
+    @{R=215; G=30;  B=30},
+    @{R=235; G=35;  B=35},
+    @{R=255; G=45;  B=45}
 )
 
 function Show-Banner([switch]$Centered) {
