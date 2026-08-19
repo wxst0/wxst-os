@@ -59,6 +59,64 @@ function Write-AnsiColorName($Text, $ColorName, [switch]$NoNewline) {
     }
 }
 
+# Draws a title above a bordered box containing the given lines (each
+# line already formatted, e.g. "[1] VPN"). Used for every menu screen
+# so options/numbers are easy to scan.
+# Dark red -> bright red gradient used across every box.
+$BoxGradient = @(
+    @{R=90;  G=5;  B=5},
+    @{R=120; G=8;  B=8},
+    @{R=150; G=12; B=12},
+    @{R=180; G=18; B=18},
+    @{R=210; G=25; B=25},
+    @{R=255; G=40; B=40}
+)
+function Get-BoxColor($Index, $Total) {
+    if ($Total -le 1) { return $BoxGradient[-1] }
+    $pos = $Index / [Math]::Max(1, ($Total - 1))
+    $i = [int][Math]::Floor($pos * ($BoxGradient.Count - 1))
+    return $BoxGradient[$i]
+}
+
+function Show-Box($Title, [string[]]$Lines, [switch]$Centered) {
+    $consoleWidth = try { [Console]::WindowWidth } catch { 120 }
+    $longest = 0
+    foreach ($l in (@($Title) + $Lines)) { if ($l.Length -gt $longest) { $longest = $l.Length } }
+    $boxWidth = $longest + 4
+    if ($boxWidth -gt $consoleWidth - 2) { $boxWidth = $consoleWidth - 2 }
+    $inner = $boxWidth - 2
+    $leftPad = if ($Centered) { [Math]::Max(0, [int](($consoleWidth - $boxWidth) / 2)) } else { 0 }
+
+    $totalRows = 2 + $Lines.Count  # top border + content rows + bottom border
+    $rowIdx = 0
+
+    $titlePad = $leftPad + [Math]::Max(0, [int](($boxWidth - $Title.Length) / 2))
+    Write-Host (' ' * $titlePad) -NoNewline
+    $tc = $BoxGradient[-1]
+    Write-Ansi "$Title`n" $tc.R $tc.G $tc.B
+
+    Write-Host (' ' * $leftPad) -NoNewline
+    $c = Get-BoxColor $rowIdx $totalRows
+    Write-Ansi ('┌' + ('─' * $boxWidth) + "┐`n") $c.R $c.G $c.B
+    $rowIdx++
+
+    foreach ($l in $Lines) {
+        $content = ' ' + $l
+        if ($content.Length -lt $inner) { $content = $content.PadRight($inner) }
+        elseif ($content.Length -gt $inner) { $content = $content.Substring(0, $inner) }
+        $c = Get-BoxColor $rowIdx $totalRows
+        Write-Host (' ' * $leftPad) -NoNewline
+        Write-Ansi '│' $c.R $c.G $c.B -NoNewline
+        Write-Host $content -NoNewline
+        Write-Ansi "│`n" $c.R $c.G $c.B
+        $rowIdx++
+    }
+
+    $c = Get-BoxColor $rowIdx $totalRows
+    Write-Host (' ' * $leftPad) -NoNewline
+    Write-Ansi ('└' + ('─' * $boxWidth) + "┘`n") $c.R $c.G $c.B
+}
+
 # ============================== BANNER ===============================
 # "WXST OS" - Bloody font
 $BannerLines = @(
@@ -310,10 +368,7 @@ function Invoke-VpnDisconnect {
 function Show-VpnMenu {
     while ($true) {
         Clear-Host
-        Write-AnsiColorName "=== VPN ===`n" 'white'
-        Write-Host "[1] Connect"
-        Write-Host "[2] Disconnect"
-        Write-Host "[B] Back"
+        Show-Box "VPN" @("[1] Connect", "[2] Disconnect", "[B] Back")
         $choice = Read-Host "vpn>"
         switch ($choice.Trim().ToUpper()) {
             '1' { Invoke-VpnConnect; Read-Host "Press Enter to continue" }
@@ -325,8 +380,6 @@ function Show-VpnMenu {
 
 function Invoke-PhoneInfo {
     Clear-Host
-    Write-AnsiColorName "=== Connected Phone Hardware Info ===`n" 'white'
-    Write-Host ""
 
     $PnPDevices = Get-CimInstance -ClassName Win32_PnPEntity | Where-Object {
         $_.Service -match "winusb|wceusbsh|usbser|tsusbhub" -or
@@ -334,26 +387,18 @@ function Invoke-PhoneInfo {
         $_.DeviceClass -match "Modem"
     }
 
+    $boxLines = @()
     if ($PnPDevices) {
         foreach ($Device in $PnPDevices) {
-            Write-Host "Device Name: " -NoNewline
-            Write-AnsiColorName $Device.Caption 'gray'
-            Write-Host "Status:      " -NoNewline
-            if ($Device.Status -eq "OK") {
-                Write-AnsiColorName $Device.Status 'green'
-            } else {
-                Write-AnsiColorName $Device.Status 'red'
-            }
-            Write-Host "Device ID:   " -NoNewline
-            Write-AnsiColorName $Device.DeviceID 'gray'
-            Write-Host ("-" * 40)
+            $boxLines += "$($Device.Caption)"
+            $boxLines += "  Status: $($Device.Status)   ID: $($Device.DeviceID)"
         }
     } else {
-        Write-AnsiColorName "No connected phone hardware or ADB interfaces detected via USB.`n" 'gray'
-        Write-Host ("-" * 40)
+        $boxLines += "No connected phone hardware or ADB interfaces detected via USB."
     }
-
+    Show-Box "Connected Phone Hardware Info" $boxLines
     Write-Host ""
+
     Write-AnsiColorName "[" 'white' -NoNewline
     Write-AnsiColorName "+" 'green' -NoNewline
     Write-AnsiColorName "] Phone Number: " 'white' -NoNewline
@@ -510,8 +555,6 @@ $Global:CallerIdBlockEnabled = $false
 function Invoke-AndroidCall {
     while ($true) {
     Clear-Host
-    Write-AnsiColorName "=== Call via Connected Android Phone ===`n" 'white'
-    Write-Host ""
 
     if (-not (Get-Command $AdbPath -ErrorAction SilentlyContinue)) {
         Write-AnsiColorName "[!] " 'red' -NoNewline
@@ -531,17 +574,14 @@ function Invoke-AndroidCall {
     $model = (& $AdbPath -s $serial shell getprop ro.product.model 2>$null).Trim()
     $manufacturer = (& $AdbPath -s $serial shell getprop ro.product.manufacturer 2>$null).Trim()
     $battery = (& $AdbPath -s $serial shell dumpsys battery 2>$null | Select-String "level").ToString().Trim()
+    $callerIdText = if ($Global:CallerIdBlockEnabled) { "BLOCKED (*67 will be dialed)" } else { "Visible" }
 
-    Write-Host "Device       : " -NoNewline
-    Write-AnsiColorName "$manufacturer $model" 'gray'
-    Write-Host "Serial       : " -NoNewline
-    Write-AnsiColorName $serial 'gray'
-    Write-Host "Battery      : " -NoNewline
-    Write-AnsiColorName $battery 'gray'
-    Write-Host "Caller ID    : " -NoNewline
-    if ($Global:CallerIdBlockEnabled) { Write-AnsiColorName "BLOCKED (*67 will be dialed)" 'red' }
-    else { Write-AnsiColorName "Visible" 'green' }
-    Write-Host ("-" * 40)
+    Show-Box "Call via Connected Android Phone" @(
+        "Device    : $manufacturer $model",
+        "Serial    : $serial",
+        "Battery   : $battery",
+        "Caller ID : $callerIdText"
+    )
     Write-Host ""
     Write-AnsiColorName "[" 'white' -NoNewline
     Write-AnsiColorName "+" 'green' -NoNewline
@@ -597,12 +637,7 @@ function Invoke-AndroidCall {
 function Show-WoofingMenu {
     while ($true) {
         Clear-Host
-        Write-AnsiColorName "=== Woofing ===`n" 'white'
-        Write-Host "[1] VPN"
-        Write-Host "[2] Phone VPN"
-        Write-Host "[3] Phone Hardware Info"
-        Write-Host "[4] Call (Android via ADB)"
-        Write-Host "[B] Back"
+        Show-Box "Woofing" @("[1] VPN", "[2] Phone VPN", "[3] Phone Hardware Info", "[4] Call (Android via ADB)", "[B] Back")
         $choice = Read-Host "woofing>"
         switch ($choice.Trim().ToUpper()) {
             '1' { Show-VpnMenu }
@@ -676,12 +711,7 @@ function Invoke-ReverseDns {
 function Show-IpToolsMenu {
     while ($true) {
         Clear-Host
-        Write-AnsiColorName "=== IP Tools ===`n" 'white'
-        Write-Host "[1] IP Cleaner (flush DNS + renew IP)"
-        Write-Host "[2] IP Geolocation"
-        Write-Host "[3] Reverse IP"
-        Write-Host "[4] Reverse DNS"
-        Write-Host "[B] Back"
+        Show-Box "IP Tools" @("[1] IP Cleaner (flush DNS + renew IP)", "[2] IP Geolocation", "[3] Reverse IP", "[4] Reverse DNS", "[B] Back")
         $choice = Read-Host "iptools>"
         switch ($choice.Trim().ToUpper()) {
             '1' { Invoke-IpCleaner; Read-Host "`nPress Enter to continue" }
@@ -720,7 +750,9 @@ function Invoke-DnsRecordLookup {
 }
 
 function Invoke-RemoteDesktop {
-    Write-AnsiColorName "=== Remote Desktop Connection ===`n" 'white'
+    Clear-Host
+    Show-Box "Remote Desktop Connection" @("Enter connection details below")
+    Write-Host ""
     $ip   = Read-Host "Remote IP or hostname"
     if (-not $ip) { return }
     $user = Read-Host "Username"
@@ -750,7 +782,7 @@ function Invoke-RemoteDesktop {
 # device-blocking/QoS feature is a completely different, buildable
 # thing - tell me the router brand/model and I can look at that.
 function Invoke-NetworkScan {
-    Write-AnsiColorName "=== Network Device Scan ===`n" 'white'
+    Clear-Host
     Write-Host "Scanning local subnet (this populates the ARP table, may take a few seconds)..."
 
     $localIp = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
@@ -787,9 +819,9 @@ function Invoke-NetworkScan {
         $i++
     }
 
-    $devices | ForEach-Object {
-        Write-Host "[$($_.Index)] $($_.IP)  $($_.MAC)  $($_.Hostname)"
-    }
+    $boxLines = $devices | ForEach-Object { "[$($_.Index)] $($_.IP)  $($_.MAC)  $($_.Hostname)" }
+    Clear-Host
+    Show-Box "Network Device Scan" $boxLines
     Write-Host ""
     $choice = Read-Host "Select a device number for details (or Enter to skip)"
     $idx = 0
@@ -797,9 +829,11 @@ function Invoke-NetworkScan {
         $selected = $devices | Where-Object { $_.Index -eq $idx }
         if ($selected) {
             Write-Host ""
-            Write-Host "IP       : $($selected.IP)"
-            Write-Host "MAC      : $($selected.MAC)"
-            Write-Host "Hostname : $($selected.Hostname)"
+            Show-Box "Device Detail" @(
+                "IP       : $($selected.IP)",
+                "MAC      : $($selected.MAC)",
+                "Hostname : $($selected.Hostname)"
+            )
             Write-Host ""
             Write-AnsiColorName "Disconnect / throttle isn't available from here - see the note in the script for why, and use your router's device management / parental controls for that.`n" 'gray'
         }
@@ -809,12 +843,7 @@ function Invoke-NetworkScan {
 function Show-MiscMenu {
     while ($true) {
         Clear-Host
-        Write-AnsiColorName "=== Misc ===`n" 'white'
-        Write-Host "[1] WHOIS Lookup"
-        Write-Host "[2] DNS Record Lookup"
-        Write-Host "[3] Remote Desktop Connection"
-        Write-Host "[4] Scan Network Devices"
-        Write-Host "[B] Back"
+        Show-Box "Misc" @("[1] WHOIS Lookup", "[2] DNS Record Lookup", "[3] Remote Desktop Connection", "[4] Scan Network Devices", "[B] Back")
         $choice = Read-Host "misc>"
         switch ($choice.Trim().ToUpper()) {
             '1' { Invoke-WhoisLookup; Read-Host "`nPress Enter to continue" }
@@ -845,21 +874,7 @@ function Show-MainMenu($Hwid, $Label, $ExpiryUtcString, $MaskedKey) {
             Write-Host $l
         }
         Write-Host ""
-        $menu = "----------------------------------------"
-        $pad = [Math]::Max(0, [int](($width - $menu.Length) / 2))
-        Write-Host (' ' * $pad) -NoNewline
-        Write-Host $menu
-        $opts = @(
-            "[1] Woofing",
-            "[2] IP Tools",
-            "[3] Misc",
-            "[Q] Quit"
-        )
-        foreach ($o in $opts) {
-            $pad = [Math]::Max(0, [int](($width - $o.Length) / 2))
-            Write-Host (' ' * $pad) -NoNewline
-            Write-Host $o
-        }
+        Show-Box "Menu" @("[1] Woofing", "[2] IP Tools", "[3] Misc", "[Q] Quit") -Centered
         Write-Host ""
 
         $choice = Read-Host "wxst>"
