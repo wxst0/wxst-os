@@ -138,7 +138,7 @@ function Get-TreeColor($Index, $Total) {
 #   |=(2) Option two
 #   L=(3) Option three
 #   L==>
-# $Lines are plain labels ("Woofing", "Back") - numbering/lettering
+# $Lines are plain labels ("OS Tools", "Back") - numbering/lettering
 # and the (N) formatting is added here, in order, with the last entry
 # getting the elbow connector automatically.
 function Show-TreeMenu($Title, [string[]]$Lines, [switch]$Centered) {
@@ -375,322 +375,156 @@ function Get-TimeLeftText($ExpiryUtcString) {
     return "{0}m remaining" -f [int]$remaining.TotalMinutes
 }
 
-# ============================ TOOL PLUG-IN POINTS ============================
-$VpnConnectionName   = ""                          # name of a Windows VPN connection (Settings > VPN) to drive with rasdial
-$PhoneVpnScript      = ""                          # path to your own script that talks to your phone (adb, tasker webhook, etc)
-
-function Invoke-ExternalScript($Path, $FriendlyName) {
-    if (-not $Path -or -not (Test-Path $Path)) {
-        Write-AnsiColorName "[!] " 'red' -NoNewline
-        Write-Host "$FriendlyName isn't configured yet. Set its path/script and try again."
-        return
-    }
-    Write-Host "Launching $FriendlyName..."
+# ------------------------------ Section: OS Tools ------------------------------
+function Invoke-Debloat {
+    Clear-Host
+    Show-TreeMenu "Debloat / Tweaks" @("Launching Chris Titus Tech's WinUtil (christitus.com/win)...")
+    Write-Host ""
     try {
-        & $Path
+        Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile -Command "irm christitus.com/win | iex"'
     } catch {
         Write-AnsiColorName "[!] " 'red' -NoNewline
-        Write-Host "Error running $FriendlyName`: $($_.Exception.Message)"
+        Write-Host "Couldn't launch WinUtil (needs admin elevation): $($_.Exception.Message)"
     }
+    Write-Host ""
+    Read-Host "WinUtil opens in its own elevated window - press Enter here to return to the menu"
+}
+
+function Invoke-SystemInfo {
+    Clear-Host
+    $os = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue
+    $cpu = Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1
+    $mem = $os.TotalVisibleMemorySize, $os.FreePhysicalMemory
+    $totalGB = [Math]::Round($os.TotalVisibleMemorySize / 1MB, 1)
+    $freeGB  = [Math]::Round($os.FreePhysicalMemory / 1MB, 1)
+    $uptime = (Get-Date) - $os.LastBootUpTime
+
+    $disks = Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" -ErrorAction SilentlyContinue
+
+    $lines = @(
+        "OS       : $($os.Caption)",
+        "CPU      : $($cpu.Name)",
+        "RAM      : $freeGB GB free / $totalGB GB total",
+        "Uptime   : {0}d {1}h {2}m" -f $uptime.Days, $uptime.Hours, $uptime.Minutes
+    )
+    foreach ($d in $disks) {
+        $freeD = [Math]::Round($d.FreeSpace / 1GB, 1)
+        $totalD = [Math]::Round($d.Size / 1GB, 1)
+        $lines += "Disk $($d.DeviceID)   : $freeD GB free / $totalD GB total"
+    }
+    Show-Box "System Info" $lines
     Write-Host ""
     Read-Host "Press Enter to return to the menu"
 }
 
-# ------------------------------ Section: Woofing ------------------------------
-function Invoke-VpnConnect {
-    if (-not $VpnConnectionName) {
-        Write-AnsiColorName "[!] " 'red' -NoNewline
-        Write-Host "No VPN connection configured. Set `$VpnConnectionName to a connection you've set up under Windows Settings > VPN."
-        return
-    }
-    Write-Host "Connecting to VPN '$VpnConnectionName'..."
-    rasdial "$VpnConnectionName"
-}
-
-function Invoke-VpnDisconnect {
-    if (-not $VpnConnectionName) { return }
-    rasdial "$VpnConnectionName" /disconnect
-}
-
-function Show-VpnMenu {
+function Invoke-ProcessManager {
     while ($true) {
         Clear-Host
-        Show-TreeMenu "VPN" @("(1) Connect", "(2) Disconnect", "(B) Back")
-        $choice = Read-Host "vpn>"
-        switch ($choice.Trim().ToUpper()) {
-            '1' { Invoke-VpnConnect; Read-Host "Press Enter to continue" }
-            '2' { Invoke-VpnDisconnect; Read-Host "Press Enter to continue" }
-            'B' { return }
+        $procs = Get-Process | Sort-Object -Property CPU -Descending | Select-Object -First 15
+        $lines = @()
+        $i = 1
+        $indexed = @()
+        foreach ($p in $procs) {
+            $cpuTime = if ($p.CPU) { [Math]::Round($p.CPU, 1) } else { 0 }
+            $mem = [Math]::Round($p.WorkingSet64 / 1MB, 1)
+            $lines += "($i) $($p.ProcessName)  (PID $($p.Id), ${mem}MB, CPU ${cpuTime}s)"
+            $indexed += [PSCustomObject]@{ Index = $i; Id = $p.Id; Name = $p.ProcessName }
+            $i++
+        }
+        Show-TreeMenu "Process Manager (top 15 by CPU)" ($lines + @("(B) Back"))
+        $choice = Read-Host "Enter a number to end that process, or B"
+        if ($choice.Trim().ToUpper() -eq 'B') { return }
+        $idx = 0
+        if ([int]::TryParse($choice, [ref]$idx)) {
+            $target = $indexed | Where-Object { $_.Index -eq $idx }
+            if ($target) {
+                $confirm = Read-Host "End '$($target.Name)' (PID $($target.Id))? (y/N)"
+                if ($confirm.Trim().ToUpper() -eq 'Y') {
+                    try {
+                        Stop-Process -Id $target.Id -Force -ErrorAction Stop
+                        Write-AnsiColorName "[+] Process ended.`n" 'green'
+                    } catch {
+                        Write-AnsiColorName "[!] " 'red' -NoNewline
+                        Write-Host "Couldn't end process: $($_.Exception.Message)"
+                    }
+                    Start-Sleep -Seconds 1
+                }
+            }
         }
     }
 }
 
-function Invoke-PhoneInfo {
+function Invoke-TempCleanup {
     Clear-Host
-
-    $PnPDevices = Get-CimInstance -ClassName Win32_PnPEntity | Where-Object {
-        $_.Service -match "winusb|wceusbsh|usbser|tsusbhub" -or
-        $_.Description -match "Phone|Mobile|Android|Modem|ADB" -or
-        $_.DeviceClass -match "Modem"
-    }
-
-    $boxLines = @()
-    if ($PnPDevices) {
-        foreach ($Device in $PnPDevices) {
-            $boxLines += "$($Device.Caption)"
-            $boxLines += "  Status: $($Device.Status)   ID: $($Device.DeviceID)"
+    Show-Box "Temp File Cleanup" @("Clearing user + Windows temp folders...")
+    $paths = @($env:TEMP, "$env:WINDIR\Temp")
+    $freedBytes = 0
+    foreach ($p in $paths) {
+        if (Test-Path $p) {
+            Get-ChildItem -Path $p -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
+                try {
+                    $freedBytes += $_.Length
+                    Remove-Item $_.FullName -Force -Recurse -ErrorAction SilentlyContinue
+                } catch {}
+            }
         }
-    } else {
-        $boxLines += "No connected phone hardware or ADB interfaces detected via USB."
     }
-    Show-Box "Connected Phone Hardware Info" $boxLines -Centered
+    $freedMB = [Math]::Round($freedBytes / 1MB, 1)
     Write-Host ""
-
-    Write-AnsiColorName "[" 'white' -NoNewline
-    Write-AnsiColorName "+" 'green' -NoNewline
-    Write-AnsiColorName "] Phone Number: " 'white' -NoNewline
-    $PhoneNumber = Read-Host
-
-    if (-not [string]::IsNullOrWhiteSpace($PhoneNumber)) {
-        Write-Host ""
-        Write-AnsiColorName "[" 'white' -NoNewline
-        Write-AnsiColorName "+" 'green' -NoNewline
-        Write-AnsiColorName "] Connected`n" 'white'
-        Show-PhoneNumberInfo -PhoneNumber $PhoneNumber
-    } else {
-        Write-AnsiColorName "No phone number entered." 'red'
-    }
+    Write-AnsiColorName "[+] " 'green' -NoNewline
+    Write-Host "Done. Freed approximately $freedMB MB (files in use were skipped)."
     Write-Host ""
     Read-Host "Press Enter to return to the menu"
 }
 
-# Best-effort, offline NANP area code -> region lookup. Not exhaustive,
-# and area codes can be reassigned/overlaid over time, so treat this as
-# a rough first signal, not a verified source. Set $PhoneLookupApiKey
-# below (numlookupapi.com, Twilio Lookup, etc.) for live carrier/line-
-# type data instead of just a rough region guess.
-$PhoneLookupApiKey = ""     # optional - leave blank to use offline area code lookup only
-$PhoneLookupApiUrl = ""     # e.g. "https://api.numlookupapi.com/v1/validate/{number}?apikey={key}"
-
-$AreaCodeMap = @{
-    '201'='NJ - Jersey City';'202'='DC - Washington';'203'='CT - Bridgeport';'205'='AL - Birmingham'
-    '206'='WA - Seattle';'207'='ME - Statewide';'208'='ID - Statewide';'209'='CA - Stockton'
-    '210'='TX - San Antonio';'212'='NY - Manhattan';'213'='CA - Los Angeles';'214'='TX - Dallas'
-    '215'='PA - Philadelphia';'216'='OH - Cleveland';'217'='IL - Springfield';'218'='MN - Duluth'
-    '219'='IN - Gary';'224'='IL - Chicago suburbs';'225'='LA - Baton Rouge';'228'='MS - Gulfport'
-    '229'='GA - Albany';'231'='MI - Traverse City';'234'='OH - Akron';'239'='FL - Fort Myers'
-    '240'='MD - Suburban DC';'248'='MI - Troy';'251'='AL - Mobile';'252'='NC - Rocky Mount'
-    '253'='WA - Tacoma';'254'='TX - Waco';'256'='AL - Huntsville';'260'='IN - Fort Wayne'
-    '262'='WI - Kenosha';'267'='PA - Philadelphia';'269'='MI - Kalamazoo';'270'='KY - Bowling Green'
-    '276'='VA - Bristol';'281'='TX - Houston';'301'='MD - Suburban DC';'302'='DE - Statewide'
-    '303'='CO - Denver';'304'='WV - Statewide';'305'='FL - Miami';'307'='WY - Statewide'
-    '308'='NE - North Platte';'309'='IL - Peoria';'310'='CA - Los Angeles (West)';'312'='IL - Chicago'
-    '313'='MI - Detroit';'314'='MO - St. Louis';'315'='NY - Syracuse';'316'='KS - Wichita'
-    '317'='IN - Indianapolis';'318'='LA - Shreveport';'319'='IA - Cedar Rapids';'320'='MN - St. Cloud'
-    '321'='FL - Orlando';'323'='CA - Los Angeles';'325'='TX - Abilene';'330'='OH - Akron'
-    '334'='AL - Montgomery';'336'='NC - Greensboro';'337'='LA - Lafayette';'339'='MA - Boston area'
-    '340'='USVI';'347'='NY - NYC boroughs';'351'='MA - Lowell';'352'='FL - Gainesville'
-    '360'='WA - Vancouver';'361'='TX - Corpus Christi';'385'='UT - Salt Lake City';'386'='FL - Daytona Beach'
-    '401'='RI - Statewide';'402'='NE - Omaha';'404'='GA - Atlanta';'405'='OK - Oklahoma City'
-    '406'='MT - Statewide';'407'='FL - Orlando';'408'='CA - San Jose';'409'='TX - Beaumont'
-    '410'='MD - Baltimore';'412'='PA - Pittsburgh';'413'='MA - Springfield';'414'='WI - Milwaukee'
-    '415'='CA - San Francisco';'417'='MO - Springfield';'419'='OH - Toledo';'423'='TN - Chattanooga'
-    '424'='CA - Los Angeles';'425'='WA - Bellevue';'432'='TX - Midland';'434'='VA - Lynchburg'
-    '435'='UT - St. George';'440'='OH - Cleveland suburbs';'443'='MD - Baltimore';'458'='OR - Eugene'
-    '469'='TX - Dallas';'470'='GA - Atlanta';'475'='CT - New Haven';'478'='GA - Macon'
-    '479'='AR - Fayetteville';'480'='AZ - Scottsdale';'484'='PA - Allentown';'501'='AR - Little Rock'
-    '502'='KY - Louisville';'503'='OR - Portland';'504'='LA - New Orleans';'505'='NM - Albuquerque'
-    '507'='MN - Rochester';'508'='MA - Worcester';'509'='WA - Spokane';'510'='CA - Oakland'
-    '512'='TX - Austin';'513'='OH - Cincinnati';'515'='IA - Des Moines';'516'='NY - Long Island'
-    '517'='MI - Lansing';'518'='NY - Albany';'520'='AZ - Tucson';'530'='CA - Redding'
-    '540'='VA - Roanoke';'541'='OR - Eugene';'551'='NJ - Jersey City';'559'='CA - Fresno'
-    '561'='FL - West Palm Beach';'562'='CA - Long Beach';'563'='IA - Davenport';'570'='PA - Scranton'
-    '571'='VA - Suburban DC';'573'='MO - Columbia';'574'='IN - South Bend';'575'='NM - Las Cruces'
-    '580'='OK - Lawton';'585'='NY - Rochester';'586'='MI - Warren';'601'='MS - Jackson'
-    '602'='AZ - Phoenix';'603'='NH - Statewide';'605'='SD - Statewide';'606'='KY - Ashland'
-    '607'='NY - Binghamton';'608'='WI - Madison';'609'='NJ - Trenton';'610'='PA - Allentown'
-    '612'='MN - Minneapolis';'614'='OH - Columbus';'615'='TN - Nashville';'616'='MI - Grand Rapids'
-    '617'='MA - Boston';'618'='IL - Belleville';'619'='CA - San Diego';'620'='KS - Hutchinson'
-    '623'='AZ - Phoenix (West)';'626'='CA - Pasadena';'628'='CA - San Francisco';'629'='TN - Nashville'
-    '630'='IL - Naperville';'631'='NY - Suffolk County';'636'='MO - St. Charles';'641'='IA - Mason City'
-    '646'='NY - Manhattan';'650'='CA - San Mateo';'651'='MN - St. Paul';'657'='CA - Anaheim'
-    '660'='MO - Sedalia';'661'='CA - Bakersfield';'662'='MS - Tupelo';'667'='MD - Baltimore'
-    '669'='CA - San Jose';'678'='GA - Atlanta';'682'='TX - Fort Worth';'701'='ND - Statewide'
-    '702'='NV - Las Vegas';'703'='VA - Suburban DC';'704'='NC - Charlotte';'706'='GA - Columbus'
-    '707'='CA - Santa Rosa';'708'='IL - Cicero';'712'='IA - Sioux City';'713'='TX - Houston'
-    '714'='CA - Anaheim';'715'='WI - Eau Claire';'716'='NY - Buffalo';'717'='PA - Harrisburg'
-    '718'='NY - NYC boroughs';'719'='CO - Colorado Springs';'720'='CO - Denver';'724'='PA - New Castle'
-    '725'='NV - Las Vegas';'727'='FL - St. Petersburg';'731'='TN - Jackson';'732'='NJ - New Brunswick'
-    '734'='MI - Ann Arbor';'737'='TX - Austin';'740'='OH - Zanesville';'747'='CA - Burbank'
-    '754'='FL - Fort Lauderdale';'757'='VA - Norfolk';'760'='CA - Oceanside';'762'='GA - Augusta'
-    '763'='MN - Minneapolis suburbs';'765'='IN - Muncie';'770'='GA - Atlanta suburbs';'772'='FL - Port St. Lucie'
-    '773'='IL - Chicago';'774'='MA - Worcester';'775'='NV - Reno';'781'='MA - Boston suburbs'
-    '785'='KS - Topeka';'786'='FL - Miami';'801'='UT - Salt Lake City';'802'='VT - Statewide'
-    '803'='SC - Columbia';'804'='VA - Richmond';'805'='CA - Ventura';'806'='TX - Amarillo'
-    '808'='HI - Statewide';'810'='MI - Flint';'812'='IN - Evansville';'813'='FL - Tampa'
-    '814'='PA - Erie';'815'='IL - Rockford';'816'='MO - Kansas City';'817'='TX - Fort Worth'
-    '818'='CA - San Fernando Valley';'828'='NC - Asheville';'830'='TX - New Braunfels';'831'='CA - Salinas'
-    '832'='TX - Houston';'843'='SC - Charleston';'845'='NY - Poughkeepsie';'847'='IL - Evanston'
-    '848'='NJ - New Brunswick';'850'='FL - Tallahassee';'854'='SC - Charleston';'856'='NJ - Camden'
-    '857'='MA - Boston';'858'='CA - San Diego';'859'='KY - Lexington';'860'='CT - Hartford'
-    '862'='NJ - Newark';'863'='FL - Lakeland';'864'='SC - Greenville';'865'='TN - Knoxville'
-    '870'='AR - Jonesboro';'872'='IL - Chicago';'878'='PA - Pittsburgh';'901'='TN - Memphis'
-    '903'='TX - Tyler';'904'='FL - Jacksonville';'906'='MI - Upper Peninsula';'907'='AK - Statewide'
-    '908'='NJ - Elizabeth';'909'='CA - San Bernardino';'910'='NC - Fayetteville';'912'='GA - Savannah'
-    '913'='KS - Kansas City (KS)';'914'='NY - Westchester';'915'='TX - El Paso';'916'='CA - Sacramento'
-    '917'='NY - NYC mobile';'918'='OK - Tulsa';'919'='NC - Raleigh';'920'='WI - Green Bay'
-    '925'='CA - Concord';'928'='AZ - Flagstaff';'929'='NY - NYC boroughs';'930'='IN - Evansville'
-    '931'='TN - Clarksville';'936'='TX - Conroe';'937'='OH - Dayton';'940'='TX - Wichita Falls'
-    '941'='FL - Sarasota';'947'='MI - Troy';'949'='CA - Irvine';'951'='CA - Riverside'
-    '952'='MN - Bloomington';'954'='FL - Fort Lauderdale';'956'='TX - Laredo';'959'='CT - Hartford'
-    '970'='CO - Fort Collins';'971'='OR - Portland';'972'='TX - Dallas';'973'='NJ - Newark'
-    '978'='MA - Lowell';'979'='TX - Bryan';'980'='NC - Charlotte';'984'='NC - Raleigh'
-    '985'='LA - Houma';'989'='MI - Saginaw'
-    '403'='AB - Calgary';'416'='ON - Toronto';'438'='QC - Montreal';'514'='QC - Montreal'
-    '604'='BC - Vancouver';'613'='ON - Ottawa';'647'='ON - Toronto';'778'='BC - Vancouver'
-    '780'='AB - Edmonton';'902'='NS/PEI - Halifax';'905'='ON - Toronto suburbs'
-}
-
-function Show-PhoneNumberInfo($PhoneNumber) {
-    $digits = ($PhoneNumber -replace '[^\d]', '')
-    if ($digits.Length -eq 11 -and $digits.StartsWith('1')) { $digits = $digits.Substring(1) }
-
-    if ($PhoneLookupApiUrl -and $PhoneLookupApiKey) {
-        try {
-            $url = $PhoneLookupApiUrl -replace '\{number\}', $digits -replace '\{key\}', $PhoneLookupApiKey
-            $r = Invoke-RestMethod -Uri $url -ErrorAction Stop
-            Write-Host ($r | ConvertTo-Json -Depth 4)
-            return
-        } catch {
-            Write-AnsiColorName "[!] " 'red' -NoNewline
-            Write-Host "Live lookup failed, falling back to offline area code guess."
-        }
-    }
-
-    if ($digits.Length -ge 3) {
-        $areaCode = $digits.Substring(0, 3)
-        if ($AreaCodeMap.ContainsKey($areaCode)) {
-            Write-Host "Area code $areaCode is typically registered to: " -NoNewline
-            Write-AnsiColorName $AreaCodeMap[$areaCode] 'green'
-        } else {
-            Write-AnsiColorName "Area code $areaCode isn't in the offline lookup table." 'gray'
-        }
-    } else {
-        Write-AnsiColorName "Number too short to identify an area code." 'red'
-    }
-    Write-AnsiColorName "`nNote: area code = rough origin of the *number*, not proof of the caller's real location - spoofed caller ID is common with scam calls, so treat this as one signal, not confirmation." 'gray'
-}
-
-# ---- Place a call from a USB-connected Android phone via ADB ----
-# Requires: USB debugging enabled on the phone, ADB authorized for
-# this PC, and platform-tools' adb.exe reachable (set $AdbPath if it's
-# not on your system PATH).
-$AdbPath = "adb"
-
-function Get-AdbDeviceSerial {
-    $out = & $AdbPath devices 2>$null
-    $line = $out | Select-Object -Skip 1 | Where-Object { $_ -match "\tdevice$" } | Select-Object -First 1
-    if ($line) { return ($line -split "`t")[0] }
-    return $null
-}
-
-# Per-call Caller ID blocking toggle (*67). This hides YOUR OWN number
-# from the person you call (they see "Private"/"Blocked") - it does not
-# display a different/fake number, so it's not caller ID spoofing.
-$Global:CallerIdBlockEnabled = $false
-
-function Invoke-AndroidCall {
+function Invoke-StartupManager {
     while ($true) {
-    Clear-Host
-
-    if (-not (Get-Command $AdbPath -ErrorAction SilentlyContinue)) {
-        Write-AnsiColorName "[!] " 'red' -NoNewline
-        Write-Host "adb not found. Install Android platform-tools and make sure adb.exe is on PATH (or set `$AdbPath)."
-        Read-Host "Press Enter to return to the menu"
-        return
-    }
-
-    $serial = Get-AdbDeviceSerial
-    if (-not $serial) {
-        Write-AnsiColorName "[!] " 'red' -NoNewline
-        Write-Host "No authorized ADB device found. Plug in your phone, enable USB debugging, and accept the RSA prompt on the phone screen."
-        Read-Host "Press Enter to return to the menu"
-        return
-    }
-
-    $model = (& $AdbPath -s $serial shell getprop ro.product.model 2>$null).Trim()
-    $manufacturer = (& $AdbPath -s $serial shell getprop ro.product.manufacturer 2>$null).Trim()
-    $battery = (& $AdbPath -s $serial shell dumpsys battery 2>$null | Select-String "level").ToString().Trim()
-    $callerIdText = if ($Global:CallerIdBlockEnabled) { "BLOCKED (*67 will be dialed)" } else { "Visible" }
-
-    Show-Box "Call via Connected Android Phone" @(
-        "Device    : $manufacturer $model",
-        "Serial    : $serial",
-        "Battery   : $battery",
-        "Caller ID : $callerIdText"
-    ) -Centered
-    Write-Host ""
-    Write-AnsiColorName "[" 'white' -NoNewline
-    Write-AnsiColorName "+" 'green' -NoNewline
-    Write-AnsiColorName "] Phone Number " 'white' -NoNewline
-    Write-Host "(or T = toggle Caller ID block, B = back): " -NoNewline
-    $action = Read-Host
-
-    switch ($action.Trim().ToUpper()) {
-        'T' {
-            $Global:CallerIdBlockEnabled = -not $Global:CallerIdBlockEnabled
-        }
-        'B' { return }
-        '' { }
-        default {
-            $number = $action.Trim()
-            $dialable = ($number -replace '[^\d\+]', '')
-            if ($Global:CallerIdBlockEnabled) { $dialable = "*67$dialable" }
-
-            Write-Host ""
-            Write-Host "Dialing $dialable from the connected phone..."
-            & $AdbPath -s $serial shell am start -a android.intent.action.CALL -d "tel:$dialable" | Out-Null
-
-            # Poll call state - OFFHOOK covers both "dialing" and "answered" since
-            # plain adb/dumpsys doesn't reliably distinguish the two without extra
-            # permissions, so treat this as "call is active", not strictly "answered".
-            Write-Host "Waiting for the call to connect (up to 30s)..."
-            $connected = $false
-            $sw = [Diagnostics.Stopwatch]::StartNew()
-            while ($sw.Elapsed.TotalSeconds -lt 30) {
-                $state = & $AdbPath -s $serial shell dumpsys telephony.registry 2>$null | Select-String "mCallState"
-                if ($state -match '=2' -or $state -match 'OFFHOOK') { $connected = $true; break }
-                Start-Sleep -Milliseconds 800
-            }
-
-            Write-Host ""
-            if ($connected) {
-                Write-AnsiColorName "[" 'white' -NoNewline
-                Write-AnsiColorName "+" 'green' -NoNewline
-                Write-AnsiColorName "] Connected`n" 'white'
-                Show-PhoneNumberInfo -PhoneNumber $number
-            } else {
-                Write-AnsiColorName "[!] " 'red' -NoNewline
-                Write-Host "Call state didn't confirm connected within 30s (may still be ringing on the phone)."
-                Show-PhoneNumberInfo -PhoneNumber $number
-            }
-            Write-Host ""
+        Clear-Host
+        $items = Get-CimInstance Win32_StartupCommand -ErrorAction SilentlyContinue | Select-Object -First 15
+        if (-not $items) {
+            Show-Box "Startup Programs" @("No startup entries found (or need to run as admin to see all).")
             Read-Host "Press Enter to return to the menu"
+            return
         }
-    }
+        $lines = @()
+        $i = 1
+        $indexed = @()
+        foreach ($it in $items) {
+            $lines += "($i) $($it.Name)  [$($it.Location)]"
+            $indexed += [PSCustomObject]@{ Index = $i; Name = $it.Name; Command = $it.Command; Location = $it.Location; User = $it.User }
+            $i++
+        }
+        Show-TreeMenu "Startup Programs" ($lines + @("(B) Back"))
+        $choice = Read-Host "Enter a number for details, or B"
+        if ($choice.Trim().ToUpper() -eq 'B') { return }
+        $idx = 0
+        if ([int]::TryParse($choice, [ref]$idx)) {
+            $target = $indexed | Where-Object { $_.Index -eq $idx }
+            if ($target) {
+                Write-Host ""
+                Show-Box "Startup Entry" @(
+                    "Name    : $($target.Name)",
+                    "Command : $($target.Command)",
+                    "Location: $($target.Location)"
+                )
+                Write-AnsiColorName "`nTo disable this, remove it via Task Manager > Startup, or the registry/folder shown above.`n" 'gray'
+                Read-Host "Press Enter to continue"
+            }
+        }
     }
 }
 
-function Show-WoofingMenu {
+function Show-OsToolsMenu {
     while ($true) {
         Clear-Host
-        Show-TreeMenu "Woofing" @("(1) VPN", "(2) Phone VPN", "(3) Phone Hardware Info", "(4) Call (Android via ADB)", "(B) Back")
-        $choice = Read-Host "woofing>"
+        Show-TreeMenu "OS Tools" @("(1) Debloat / Tweaks (WinUtil)", "(2) System Info", "(3) Process Manager", "(4) Temp File Cleanup", "(5) Startup Program Manager", "(B) Back")
+        $choice = Read-Host "ostools>"
         switch ($choice.Trim().ToUpper()) {
-            '1' { Show-VpnMenu }
-            '2' { Invoke-ExternalScript -Path $PhoneVpnScript -FriendlyName "Phone VPN" }
-            '3' { Invoke-PhoneInfo }
-            '4' { Invoke-AndroidCall }
+            '1' { Invoke-Debloat }
+            '2' { Invoke-SystemInfo }
+            '3' { Invoke-ProcessManager }
+            '4' { Invoke-TempCleanup }
+            '5' { Invoke-StartupManager }
             'B' { return }
         }
     }
@@ -921,12 +755,12 @@ function Show-MainMenu($Hwid, $Label, $ExpiryUtcString, $MaskedKey) {
             Write-AnsiColorName "$l`n" 'green'
         }
         Write-Host ""
-        Show-TreeMenu "Menu" @("(1) Woofing", "(2) IP Tools", "(3) Misc", "(Q) Quit")
+        Show-TreeMenu "Menu" @("(1) OS Tools", "(2) IP Tools", "(3) Misc", "(Q) Quit")
         Write-Host ""
 
         $choice = Read-Host "wxst>"
         switch ($choice.Trim().ToUpper()) {
-            '1' { Show-WoofingMenu }
+            '1' { Show-OsToolsMenu }
             '2' { Show-IpToolsMenu }
             '3' { Show-MiscMenu }
             'Q' {
