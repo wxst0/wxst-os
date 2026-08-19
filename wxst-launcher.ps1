@@ -117,6 +117,53 @@ function Show-Box($Title, [string[]]$Lines, [switch]$Centered) {
     Write-Ansi ('└' + ('─' * $boxWidth) + "┘`n") $c.R $c.G $c.B
 }
 
+# Green -> blue gradient used for the tree-style choice menus.
+$TreeGradient = @(
+    @{R=0;  G=210; B=70},
+    @{R=0;  G=195; B=110},
+    @{R=0;  G=175; B=150},
+    @{R=0;  G=150; B=190},
+    @{R=0;  G=125; B=225},
+    @{R=20; G=110; B=255}
+)
+function Get-TreeColor($Index, $Total) {
+    if ($Total -le 1) { return $TreeGradient[-1] }
+    $pos = $Index / [Math]::Max(1, ($Total - 1))
+    $i = [int][Math]::Floor($pos * ($TreeGradient.Count - 1))
+    return $TreeGradient[$i]
+}
+
+# Renders a branch-style choice list:
+#   |=(1) Option one
+#   |=(2) Option two
+#   L=(3) Option three
+#   L==>
+# $Lines are plain labels ("Woofing", "Back") - numbering/lettering
+# and the (N) formatting is added here, in order, with the last entry
+# getting the elbow connector automatically.
+function Show-TreeMenu($Title, [string[]]$Lines, [switch]$Centered) {
+    $consoleWidth = try { [Console]::WindowWidth } catch { 120 }
+    $longest = 0
+    foreach ($l in $Lines) { if (('╠═' + $l).Length -gt $longest) { $longest = ('╠═' + $l).Length } }
+    $leftPad = if ($Centered) { [Math]::Max(0, [int](($consoleWidth - $longest) / 2)) } else { 0 }
+
+    if ($Title) {
+        Write-Host (' ' * $leftPad) -NoNewline
+        Write-AnsiColorName "$Title`n" 'white'
+    }
+
+    $totalRows = $Lines.Count + 1
+    for ($i = 0; $i -lt $Lines.Count; $i++) {
+        $connector = if ($i -eq $Lines.Count - 1) { '╚═' } else { '╠═' }
+        $c = Get-TreeColor $i $totalRows
+        Write-Host (' ' * $leftPad) -NoNewline
+        Write-Ansi "$connector$($Lines[$i])`n" $c.R $c.G $c.B
+    }
+    $c = Get-TreeColor $Lines.Count $totalRows
+    Write-Host (' ' * $leftPad) -NoNewline
+    Write-Ansi "  ╚══>`n" $c.R $c.G $c.B
+}
+
 # ============================== BANNER ===============================
 # "WXST OS" - Bloody font
 $BannerLines = @(
@@ -243,10 +290,10 @@ function Show-HeaderScreen {
     Show-Banner
     Write-Host ""
     $hwid = Get-HWID
-    Write-AnsiColorName "PC Name : " 'gray'; Write-Host $env:COMPUTERNAME
-    Write-AnsiColorName "Account : " 'gray'; Write-Host $env:USERNAME
-    Write-AnsiColorName "OS      : " 'gray'; Write-Host ((Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue).Caption)
-    Write-AnsiColorName "HWID    : " 'gray'; Write-AnsiColorName $hwid 'white'
+    Write-AnsiColorName "PC Name : $env:COMPUTERNAME`n" 'green'
+    Write-AnsiColorName "Account : $env:USERNAME`n" 'green'
+    Write-AnsiColorName "OS      : $((Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue).Caption)`n" 'green'
+    Write-AnsiColorName "HWID    : $hwid`n" 'green'
     Write-Host ""
     Write-Host ""
     Write-Host ""
@@ -368,7 +415,7 @@ function Invoke-VpnDisconnect {
 function Show-VpnMenu {
     while ($true) {
         Clear-Host
-        Show-Box "VPN" @("[1] Connect", "[2] Disconnect", "[B] Back") -Centered
+        Show-TreeMenu "VPN" @("(1) Connect", "(2) Disconnect", "(B) Back") -Centered
         $choice = Read-Host "vpn>"
         switch ($choice.Trim().ToUpper()) {
             '1' { Invoke-VpnConnect; Read-Host "Press Enter to continue" }
@@ -637,7 +684,7 @@ function Invoke-AndroidCall {
 function Show-WoofingMenu {
     while ($true) {
         Clear-Host
-        Show-Box "Woofing" @("[1] VPN", "[2] Phone VPN", "[3] Phone Hardware Info", "[4] Call (Android via ADB)", "[B] Back") -Centered
+        Show-TreeMenu "Woofing" @("(1) VPN", "(2) Phone VPN", "(3) Phone Hardware Info", "(4) Call (Android via ADB)", "(B) Back") -Centered
         $choice = Read-Host "woofing>"
         switch ($choice.Trim().ToUpper()) {
             '1' { Show-VpnMenu }
@@ -711,7 +758,7 @@ function Invoke-ReverseDns {
 function Show-IpToolsMenu {
     while ($true) {
         Clear-Host
-        Show-Box "IP Tools" @("[1] IP Cleaner (flush DNS + renew IP)", "[2] IP Geolocation", "[3] Reverse IP", "[4] Reverse DNS", "[B] Back") -Centered
+        Show-TreeMenu "IP Tools" @("(1) IP Cleaner (flush DNS + renew IP)", "(2) IP Geolocation", "(3) Reverse IP", "(4) Reverse DNS", "(B) Back") -Centered
         $choice = Read-Host "iptools>"
         switch ($choice.Trim().ToUpper()) {
             '1' { Invoke-IpCleaner; Read-Host "`nPress Enter to continue" }
@@ -819,9 +866,9 @@ function Invoke-NetworkScan {
         $i++
     }
 
-    $boxLines = $devices | ForEach-Object { "[$($_.Index)] $($_.IP)  $($_.MAC)  $($_.Hostname)" }
+    $boxLines = $devices | ForEach-Object { "($($_.Index)) $($_.IP)  $($_.MAC)  $($_.Hostname)" }
     Clear-Host
-    Show-Box "Network Device Scan" $boxLines -Centered
+    Show-TreeMenu "Network Device Scan" $boxLines -Centered
     Write-Host ""
     $choice = Read-Host "Select a device number for details (or Enter to skip)"
     $idx = 0
@@ -843,7 +890,7 @@ function Invoke-NetworkScan {
 function Show-MiscMenu {
     while ($true) {
         Clear-Host
-        Show-Box "Misc" @("[1] WHOIS Lookup", "[2] DNS Record Lookup", "[3] Remote Desktop Connection", "[4] Scan Network Devices", "[B] Back") -Centered
+        Show-TreeMenu "Misc" @("(1) WHOIS Lookup", "(2) DNS Record Lookup", "(3) Remote Desktop Connection", "(4) Scan Network Devices", "(B) Back") -Centered
         $choice = Read-Host "misc>"
         switch ($choice.Trim().ToUpper()) {
             '1' { Invoke-WhoisLookup; Read-Host "`nPress Enter to continue" }
@@ -871,10 +918,10 @@ function Show-MainMenu($Hwid, $Label, $ExpiryUtcString, $MaskedKey) {
         foreach ($l in $lines) {
             $pad = [Math]::Max(0, [int](($width - $l.Length) / 2))
             Write-Host (' ' * $pad) -NoNewline
-            Write-Host $l
+            Write-AnsiColorName "$l`n" 'green'
         }
         Write-Host ""
-        Show-Box "Menu" @("[1] Woofing", "[2] IP Tools", "[3] Misc", "[Q] Quit") -Centered
+        Show-TreeMenu "Menu" @("(1) Woofing", "(2) IP Tools", "(3) Misc", "(Q) Quit") -Centered
         Write-Host ""
 
         $choice = Read-Host "wxst>"
