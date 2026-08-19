@@ -368,7 +368,7 @@ function Invoke-VpnDisconnect {
 function Show-VpnMenu {
     while ($true) {
         Clear-Host
-        Show-Box "VPN" @("[1] Connect", "[2] Disconnect", "[B] Back")
+        Show-Box "VPN" @("[1] Connect", "[2] Disconnect", "[B] Back") -Centered
         $choice = Read-Host "vpn>"
         switch ($choice.Trim().ToUpper()) {
             '1' { Invoke-VpnConnect; Read-Host "Press Enter to continue" }
@@ -396,7 +396,7 @@ function Invoke-PhoneInfo {
     } else {
         $boxLines += "No connected phone hardware or ADB interfaces detected via USB."
     }
-    Show-Box "Connected Phone Hardware Info" $boxLines
+    Show-Box "Connected Phone Hardware Info" $boxLines -Centered
     Write-Host ""
 
     Write-AnsiColorName "[" 'white' -NoNewline
@@ -581,7 +581,7 @@ function Invoke-AndroidCall {
         "Serial    : $serial",
         "Battery   : $battery",
         "Caller ID : $callerIdText"
-    )
+    ) -Centered
     Write-Host ""
     Write-AnsiColorName "[" 'white' -NoNewline
     Write-AnsiColorName "+" 'green' -NoNewline
@@ -637,7 +637,7 @@ function Invoke-AndroidCall {
 function Show-WoofingMenu {
     while ($true) {
         Clear-Host
-        Show-Box "Woofing" @("[1] VPN", "[2] Phone VPN", "[3] Phone Hardware Info", "[4] Call (Android via ADB)", "[B] Back")
+        Show-Box "Woofing" @("[1] VPN", "[2] Phone VPN", "[3] Phone Hardware Info", "[4] Call (Android via ADB)", "[B] Back") -Centered
         $choice = Read-Host "woofing>"
         switch ($choice.Trim().ToUpper()) {
             '1' { Show-VpnMenu }
@@ -711,7 +711,7 @@ function Invoke-ReverseDns {
 function Show-IpToolsMenu {
     while ($true) {
         Clear-Host
-        Show-Box "IP Tools" @("[1] IP Cleaner (flush DNS + renew IP)", "[2] IP Geolocation", "[3] Reverse IP", "[4] Reverse DNS", "[B] Back")
+        Show-Box "IP Tools" @("[1] IP Cleaner (flush DNS + renew IP)", "[2] IP Geolocation", "[3] Reverse IP", "[4] Reverse DNS", "[B] Back") -Centered
         $choice = Read-Host "iptools>"
         switch ($choice.Trim().ToUpper()) {
             '1' { Invoke-IpCleaner; Read-Host "`nPress Enter to continue" }
@@ -751,7 +751,7 @@ function Invoke-DnsRecordLookup {
 
 function Invoke-RemoteDesktop {
     Clear-Host
-    Show-Box "Remote Desktop Connection" @("Enter connection details below")
+    Show-Box "Remote Desktop Connection" @("Enter connection details below") -Centered
     Write-Host ""
     $ip   = Read-Host "Remote IP or hostname"
     if (-not $ip) { return }
@@ -821,7 +821,7 @@ function Invoke-NetworkScan {
 
     $boxLines = $devices | ForEach-Object { "[$($_.Index)] $($_.IP)  $($_.MAC)  $($_.Hostname)" }
     Clear-Host
-    Show-Box "Network Device Scan" $boxLines
+    Show-Box "Network Device Scan" $boxLines -Centered
     Write-Host ""
     $choice = Read-Host "Select a device number for details (or Enter to skip)"
     $idx = 0
@@ -833,7 +833,7 @@ function Invoke-NetworkScan {
                 "IP       : $($selected.IP)",
                 "MAC      : $($selected.MAC)",
                 "Hostname : $($selected.Hostname)"
-            )
+            ) -Centered
             Write-Host ""
             Write-AnsiColorName "Disconnect / throttle isn't available from here - see the note in the script for why, and use your router's device management / parental controls for that.`n" 'gray'
         }
@@ -843,7 +843,7 @@ function Invoke-NetworkScan {
 function Show-MiscMenu {
     while ($true) {
         Clear-Host
-        Show-Box "Misc" @("[1] WHOIS Lookup", "[2] DNS Record Lookup", "[3] Remote Desktop Connection", "[4] Scan Network Devices", "[B] Back")
+        Show-Box "Misc" @("[1] WHOIS Lookup", "[2] DNS Record Lookup", "[3] Remote Desktop Connection", "[4] Scan Network Devices", "[B] Back") -Centered
         $choice = Read-Host "misc>"
         switch ($choice.Trim().ToUpper()) {
             '1' { Invoke-WhoisLookup; Read-Host "`nPress Enter to continue" }
