@@ -1,6 +1,6 @@
 #requires -Version 5.1
 # ============================== CONFIG ==============================
-$ApiBase         = "https://workers.dev"
+$ApiBase         = "https://wxst-licenses.taxhriley.workers.dev/"
 $ApiBase         = $ApiBase.TrimEnd('/')  
 $AppName         = "Wxst OS"
 $LicenseDir      = Join-Path $env:LOCALAPPDATA "WxstTools"
